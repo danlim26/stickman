@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, Pause, Square, RotateCcw, Plus, Trash2, Copy, Download, 
   Brush, Move, MousePointer, Settings, Layers, Palette, ChevronUp, ChevronDown,
-  Grid3X3, Eye, EyeOff, Minimize2, Maximize2, Upload, Save
+  Grid3X3, Eye, EyeOff, Minimize2, Maximize2, Upload, Save, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { SketchPicker } from 'react-color';
 import GIF from 'gif.js';
@@ -46,8 +46,16 @@ const StickmanAnimator = () => {
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [activePanel, setActivePanel] = useState<'draw' | 'select' | 'erase'>('draw');
+  const [scrollState, setScrollState] = useState({
+    canScrollLeft: false,
+    canScrollRight: false,
+    mobileCanScrollLeft: false,
+    mobileCanScrollRight: false
+  });
   
   const animationRef = useRef<NodeJS.Timeout | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const mobileTimelineScrollRef = useRef<HTMLDivElement>(null);
 
   // Initialize canvas and handle resize
   useEffect(() => {
@@ -62,6 +70,24 @@ const StickmanAnimator = () => {
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
     return () => window.removeEventListener('resize', updateCanvasSize);
+  }, []);
+
+  // Mobile responsive behavior - collapse toolbars on small screens by default
+  useEffect(() => {
+    const checkMobile = () => {
+      const isMobile = window.innerWidth < 768; // md breakpoint
+      if (isMobile) {
+        setToolbarCollapsed(true);
+        setTimelineCollapsed(true);
+      } else {
+        setToolbarCollapsed(false);
+        setTimelineCollapsed(false);
+      }
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   // Load saved animations from localStorage
@@ -107,6 +133,56 @@ const StickmanAnimator = () => {
       }
     };
   }, [isPlaying, fps, frames.length]);
+
+  // Scroll to current frame when it changes
+  useEffect(() => {
+    if (!isPlaying) {
+      // Only auto-scroll when not playing to avoid constant scrolling during animation
+      scrollToCurrentFrame();
+    }
+  }, [currentFrame]);
+
+  // Scroll to current frame when timeline is expanded
+  useEffect(() => {
+    if (!timelineCollapsed) {
+      // Delay to ensure timeline is fully expanded
+      setTimeout(() => {
+        scrollToCurrentFrame();
+        updateScrollState();
+      }, 300);
+    }
+  }, [timelineCollapsed]);
+
+  // Update scroll state when frames change
+  useEffect(() => {
+    setTimeout(() => updateScrollState(), 100);
+  }, [frames.length]);
+
+  // Add scroll event listeners
+  useEffect(() => {
+    const desktopScroll = timelineScrollRef.current;
+    const mobileScroll = mobileTimelineScrollRef.current;
+
+    const handleScroll = () => {
+      updateScrollState();
+    };
+
+    if (desktopScroll) {
+      desktopScroll.addEventListener('scroll', handleScroll);
+    }
+    if (mobileScroll) {
+      mobileScroll.addEventListener('scroll', handleScroll);
+    }
+
+    return () => {
+      if (desktopScroll) {
+        desktopScroll.removeEventListener('scroll', handleScroll);
+      }
+      if (mobileScroll) {
+        mobileScroll.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
 
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
@@ -505,6 +581,8 @@ const StickmanAnimator = () => {
     newFrames.splice(currentFrame + 1, 0, []);
     setFrames(newFrames);
     setCurrentFrame(currentFrame + 1);
+    // Scroll to new frame after state update
+    setTimeout(() => scrollToCurrentFrame(), 100);
   };
 
   const deleteFrame = () => {
@@ -519,6 +597,8 @@ const StickmanAnimator = () => {
     newFrames.splice(currentFrame + 1, 0, JSON.parse(JSON.stringify(frames[currentFrame])));
     setFrames(newFrames);
     setCurrentFrame(currentFrame + 1);
+    // Scroll to new frame after state update
+    setTimeout(() => scrollToCurrentFrame(), 100);
   };
 
   const copySelection = () => {
@@ -782,6 +862,70 @@ const StickmanAnimator = () => {
     redrawCanvas();
   };
 
+  const scrollToCurrentFrame = () => {
+    const scrollFrame = (scrollRef: React.RefObject<HTMLDivElement | null>, isMobile: boolean) => {
+      if (!scrollRef.current) return;
+      
+      const frameWidth = isMobile ? 56 + 8 : 64 + 8; // frame width + gap
+      const containerWidth = scrollRef.current.clientWidth;
+      const scrollPosition = currentFrame * frameWidth - (containerWidth / 2) + (frameWidth / 2);
+      
+      scrollRef.current.scrollTo({
+        left: Math.max(0, scrollPosition),
+        behavior: 'smooth'
+      });
+    };
+
+    // Only scroll if timeline is visible
+    if (!timelineCollapsed) {
+      scrollFrame(timelineScrollRef, false);
+      scrollFrame(mobileTimelineScrollRef, true);
+    }
+  };
+
+  const scrollTimeline = (direction: 'left' | 'right', isMobile: boolean = false) => {
+    const scrollRef = isMobile ? mobileTimelineScrollRef : timelineScrollRef;
+    if (!scrollRef.current) return;
+    
+    const scrollAmount = isMobile ? 200 : 300;
+    const currentScroll = scrollRef.current.scrollLeft;
+    const maxScroll = scrollRef.current.scrollWidth - scrollRef.current.clientWidth;
+    
+    let newScroll;
+    if (direction === 'left') {
+      newScroll = Math.max(0, currentScroll - scrollAmount);
+    } else {
+      newScroll = Math.min(maxScroll, currentScroll + scrollAmount);
+    }
+    
+    scrollRef.current.scrollTo({
+      left: newScroll,
+      behavior: 'smooth'
+    });
+  };
+
+  const canScrollLeft = (isMobile: boolean = false): boolean => {
+    const scrollRef = isMobile ? mobileTimelineScrollRef : timelineScrollRef;
+    return scrollRef.current ? scrollRef.current.scrollLeft > 0 : false;
+  };
+
+  const canScrollRight = (isMobile: boolean = false): boolean => {
+    const scrollRef = isMobile ? mobileTimelineScrollRef : timelineScrollRef;
+    if (!scrollRef.current) return false;
+    
+    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+    return scrollLeft < scrollWidth - clientWidth - 1; // -1 for rounding
+  };
+
+  const updateScrollState = () => {
+    setScrollState({
+      canScrollLeft: canScrollLeft(false),
+      canScrollRight: canScrollRight(false),
+      mobileCanScrollLeft: canScrollLeft(true),
+      mobileCanScrollRight: canScrollRight(true)
+    });
+  };
+
 
 
   return (
@@ -811,11 +955,189 @@ const StickmanAnimator = () => {
       />
 
       {/* Top Floating Toolbar */}
-      <div className={`absolute top-4 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 ${
-        toolbarCollapsed ? 'translate-y-[-60px]' : 'translate-y-0'
+      <div className={`absolute top-2 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 w-full max-w-7xl px-2 md:px-4 ${
+        toolbarCollapsed ? 'translate-y-[-120px] md:translate-y-[-80px]' : 'translate-y-0'
       }`}>
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-2">
-          <div className="flex items-center gap-1">
+        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-2 md:p-3">
+          {/* Mobile Layout - Stacked */}
+          <div className="md:hidden space-y-2">
+            {/* Row 1: Main Tools */}
+            <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center bg-gray-100 rounded-xl p-1">
+                <button
+                  onClick={() => {
+                    setActivePanel('draw');
+                    setIsSelecting(false);
+                    setIsErasing(false);
+                    clearSelection();
+                  }}
+                  className={`p-4 rounded-lg transition-all duration-200 ${
+                    activePanel === 'draw' && !isSelecting && !isErasing
+                      ? 'bg-blue-500 text-white shadow-lg'
+                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                  }`}
+                >
+                  <Brush className="w-6 h-6" />
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setActivePanel('select');
+                    setIsErasing(false);
+                    setIsSelecting(!isSelecting);
+                    clearSelection();
+                  }}
+                  className={`p-4 rounded-lg transition-all duration-200 ${
+                    activePanel === 'select' && isSelecting
+                      ? 'bg-blue-500 text-white shadow-lg'
+                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                  }`}
+                >
+                  <MousePointer className="w-6 h-6" />
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setActivePanel('erase');
+                    setIsSelecting(false);
+                    setIsErasing(!isErasing);
+                    clearSelection();
+                  }}
+                  className={`p-4 rounded-lg transition-all duration-200 ${
+                    activePanel === 'erase' && isErasing
+                      ? 'bg-red-500 text-white shadow-lg'
+                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                  }`}
+                >
+                  <Trash2 className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Color & Animation Controls */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex items-center">
+                  <button
+                    onClick={() => setShowColorPicker(!showColorPicker)}
+                    className="p-4 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+                    title="Color Picker"
+                  >
+                    <Palette className="w-6 h-6" />
+                  </button>
+                  
+                  {showColorPicker && (
+                    <div className="absolute top-full left-0 mt-2 z-50">
+                      <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
+                      <SketchPicker
+                        color={currentColor}
+                        onChange={(color) => setCurrentColor(color.hex)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={playAnimation}
+                  className={`p-4 rounded-lg transition-all duration-200 ${
+                    isPlaying
+                      ? 'bg-green-500 text-white shadow-lg'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: Secondary Controls - Horizontally Scrollable */}
+            <div className="overflow-x-auto">
+              <div className="flex items-center gap-3 pb-2 min-w-max px-2">
+                {/* Brush Size */}
+                <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                  <div className="flex flex-col items-center">
+                    <div 
+                      className="rounded-full border mb-1" 
+                      style={{ 
+                        backgroundColor: currentColor,
+                        width: Math.max(6, Math.min(brushSize * 2, 20)), 
+                        height: Math.max(6, Math.min(brushSize * 2, 20)) 
+                      }} 
+                    />
+                    <span className="text-xs text-gray-500">{brushSize}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="20"
+                    value={brushSize}
+                    onChange={(e) => setBrushSize(Number(e.target.value))}
+                    className="w-24 accent-blue-500"
+                  />
+                </div>
+
+                {/* View Controls */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1">
+                  <button
+                    onClick={() => setShowGrid(!showGrid)}
+                    className={`p-3 rounded-lg transition-all duration-200 ${
+                      showGrid
+                        ? 'bg-blue-500 text-white shadow-lg'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <Grid3X3 className="w-5 h-5" />
+                  </button>
+                  
+                  <button
+                    onClick={() => setShowOnionSkin(!showOnionSkin)}
+                    className={`p-3 rounded-lg transition-all duration-200 ${
+                      showOnionSkin
+                        ? 'bg-blue-500 text-white shadow-lg'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <Layers className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* FPS Control */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                  <span className="text-sm text-gray-600 min-w-[40px]">{fps} fps</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="60"
+                    value={fps}
+                    onChange={(e) => setFps(Number(e.target.value))}
+                    className="w-20 accent-blue-500"
+                  />
+                </div>
+
+                {/* Export Controls */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1">
+                  <button
+                    onClick={exportAsJSON}
+                    className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+                    title="Export JSON"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                  
+                  <label className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 cursor-pointer" title="Import JSON">
+                    <Upload className="w-5 h-5" />
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={importFromJSON}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Layout - Single Row */}
+          <div className="hidden md:flex items-center gap-1 overflow-x-auto">
             {/* Tool Panels */}
             <div className="flex items-center bg-gray-100 rounded-xl p-1">
               <button
@@ -1026,55 +1348,55 @@ const StickmanAnimator = () => {
         {/* Toolbar Collapse Button */}
         <button
           onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
-          className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-8 h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
+          className="absolute -bottom-6 md:-bottom-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-10 h-10 md:w-8 md:h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
         >
-          {toolbarCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          {toolbarCollapsed ? <ChevronDown className="w-5 h-5 md:w-4 md:h-4" /> : <ChevronUp className="w-5 h-5 md:w-4 md:h-4" />}
         </button>
       </div>
 
       {/* Quick Actions Floating Panel */}
-      <div className="absolute top-4 right-4 z-20">
+      <div className="absolute top-2 md:top-4 right-2 md:right-4 z-20">
         <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-2">
           <div className="flex flex-col gap-1">
             <button
               onClick={drawStickFigure}
-              className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
               title="Add Stickman"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-6 h-6 md:w-5 md:h-5" />
             </button>
             
             <button
               onClick={clearFrame}
-              className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
               title="Clear Frame"
             >
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-6 h-6 md:w-5 md:h-5" />
             </button>
             
             <button
               onClick={() => setShowSaveModal(true)}
-              className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
               title="Save Animation"
             >
-              <Save className="w-5 h-5" />
+              <Save className="w-6 h-6 md:w-5 md:h-5" />
             </button>
             
             <button
               onClick={() => setShowLoadModal(true)}
-              className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
               title="Load Animation"
             >
-              <Upload className="w-5 h-5" />
+              <Upload className="w-6 h-6 md:w-5 md:h-5" />
             </button>
             
             <button
               onClick={downloadGIF}
               disabled={isExporting}
-              className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 disabled:opacity-50"
+              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 disabled:opacity-50 touch-manipulation"
               title="Export as GIF"
             >
-              <Download className="w-5 h-5" />
+              <Download className="w-6 h-6 md:w-5 md:h-5" />
             </button>
           </div>
         </div>
@@ -1082,7 +1404,7 @@ const StickmanAnimator = () => {
 
       {/* Selection Controls Panel */}
       {(selectedPaths.length > 0 || clipboard.length > 0) && (
-        <div className="absolute top-20 left-4 z-20">
+        <div className="absolute top-32 md:top-20 left-2 md:left-4 z-20 max-w-[calc(100vw-1rem)] md:max-w-none">
           <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-3">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-sm font-medium text-gray-800">
@@ -1095,25 +1417,25 @@ const StickmanAnimator = () => {
                 <>
                   <button
                     onClick={copySelection}
-                    className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200"
+                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
                   >
-                    <Copy className="w-4 h-4" />
+                    <Copy className="w-5 h-5 md:w-4 md:h-4" />
                     Copy
                   </button>
                   
                   <button
                     onClick={deleteSelection}
-                    className="flex items-center gap-2 px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200"
+                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 touch-manipulation"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
                     Delete
                   </button>
                   
                   <button
                     onClick={clearSelection}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200"
+                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200 touch-manipulation"
                   >
-                    <MousePointer className="w-4 h-4" />
+                    <MousePointer className="w-5 h-5 md:w-4 md:h-4" />
                     Clear
                   </button>
                 </>
@@ -1122,9 +1444,9 @@ const StickmanAnimator = () => {
               {clipboard.length > 0 && (
                 <button
                   onClick={pasteSelection}
-                  className="flex items-center gap-2 px-3 py-2 text-sm bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all duration-200"
+                  className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all duration-200 touch-manipulation"
                 >
-                  <Copy className="w-4 h-4" />
+                  <Copy className="w-5 h-5 md:w-4 md:h-4" />
                   Paste ({clipboard.length})
                 </button>
               )}
@@ -1134,94 +1456,221 @@ const StickmanAnimator = () => {
       )}
 
       {/* Bottom Timeline */}
-      <div className={`absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 ${
-        timelineCollapsed ? 'translate-y-[80px]' : 'translate-y-0'
+      <div className={`absolute bottom-2 md:bottom-4 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 w-full max-w-7xl px-2 md:px-4 ${
+        timelineCollapsed ? 'translate-y-[100px] md:translate-y-[80px]' : 'translate-y-0'
       }`}>
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-4 min-w-[600px]">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-medium text-gray-800">Timeline</span>
-            <div className="flex items-center gap-4">
+        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-3 md:p-4">
+          {/* Mobile Layout */}
+          <div className="md:hidden">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-gray-800">Timeline</span>
               <span className="text-sm text-gray-600">
-                Frame {currentFrame + 1} of {frames.length}
+                {currentFrame + 1}/{frames.length}
               </span>
-              <div className="flex gap-1">
+            </div>
+            
+            {/* Frame Controls */}
+            <div className="flex justify-center gap-2 mb-3">
+              <button
+                onClick={addFrame}
+                className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+                title="Add Frame"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+              
+              <button
+                onClick={duplicateFrame}
+                className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+                title="Duplicate Frame"
+              >
+                <Copy className="w-5 h-5" />
+              </button>
+              
+              <button
+                onClick={deleteFrame}
+                disabled={frames.length === 1}
+                className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 touch-manipulation"
+                title="Delete Frame"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Frames Scroll with Navigation */}
+            <div className="relative">
+              {/* Left Scroll Button */}
+              {scrollState.mobileCanScrollLeft && (
                 <button
-                  onClick={addFrame}
-                  className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
-                  title="Add Frame"
+                  onClick={() => scrollTimeline('left', true)}
+                  className="absolute left-0 top-1/2 transform -translate-y-1/2 z-10 bg-white/95 backdrop-blur-sm rounded-full p-2 shadow-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:bg-white transition-all duration-200 touch-manipulation"
+                  style={{ marginTop: '-4px' }} // Adjust for pb-2
                 >
-                  <Plus className="w-4 h-4" />
+                  <ChevronLeft className="w-5 h-5" />
                 </button>
-                
+              )}
+              
+              {/* Right Scroll Button */}
+              {scrollState.mobileCanScrollRight && (
                 <button
-                  onClick={duplicateFrame}
-                  className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
-                  title="Duplicate Frame"
+                  onClick={() => scrollTimeline('right', true)}
+                  className="absolute right-0 top-1/2 transform -translate-y-1/2 z-10 bg-white/95 backdrop-blur-sm rounded-full p-2 shadow-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:bg-white transition-all duration-200 touch-manipulation"
+                  style={{ marginTop: '-4px' }} // Adjust for pb-2
                 >
-                  <Copy className="w-4 h-4" />
+                  <ChevronRight className="w-5 h-5" />
                 </button>
-                
-                <button
-                  onClick={deleteFrame}
-                  disabled={frames.length === 1}
-                  className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-                  title="Delete Frame"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              )}
+              
+              {/* Scrollable Frames */}
+              <div 
+                ref={mobileTimelineScrollRef}
+                className="overflow-x-auto scrollbar-hide mx-8"
+                style={{ 
+                  scrollbarWidth: 'none',
+                  msOverflowStyle: 'none'
+                }}
+              >
+                <div className="flex gap-2 pb-2 min-w-max">
+                  {frames.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentFrame(index)}
+                      className={`flex-shrink-0 w-14 h-14 rounded-lg flex items-center justify-center text-sm font-medium transition-all duration-200 touch-manipulation ${
+                        index === currentFrame
+                          ? 'bg-blue-500 text-white shadow-lg scale-105'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-          
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {frames.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => setCurrentFrame(index)}
-                className={`flex-shrink-0 w-16 h-12 rounded-lg flex items-center justify-center text-sm font-medium transition-all duration-200 ${
-                  index === currentFrame
-                    ? 'bg-blue-500 text-white shadow-lg scale-105'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
+
+          {/* Desktop Layout */}
+          <div className="hidden md:block">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-gray-800">Timeline</span>
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">
+                  Frame {currentFrame + 1} of {frames.length}
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={addFrame}
+                    className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+                    title="Add Frame"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  
+                  <button
+                    onClick={duplicateFrame}
+                    className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
+                    title="Duplicate Frame"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  
+                  <button
+                    onClick={deleteFrame}
+                    disabled={frames.length === 1}
+                    className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                    title="Delete Frame"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            {/* Desktop Timeline with Navigation */}
+            <div className="relative">
+              {/* Left Scroll Button */}
+              {scrollState.canScrollLeft && (
+                <button
+                  onClick={() => scrollTimeline('left', false)}
+                  className="absolute left-0 top-1/2 transform -translate-y-1/2 z-10 bg-white/95 backdrop-blur-sm rounded-full p-2 shadow-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:bg-white transition-all duration-200"
+                  style={{ marginTop: '-4px' }} // Adjust for pb-2
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              )}
+              
+              {/* Right Scroll Button */}
+              {scrollState.canScrollRight && (
+                <button
+                  onClick={() => scrollTimeline('right', false)}
+                  className="absolute right-0 top-1/2 transform -translate-y-1/2 z-10 bg-white/95 backdrop-blur-sm rounded-full p-2 shadow-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:bg-white transition-all duration-200"
+                  style={{ marginTop: '-4px' }} // Adjust for pb-2
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              )}
+              
+              {/* Scrollable Frames */}
+              <div 
+                ref={timelineScrollRef}
+                className="overflow-x-auto scrollbar-hide mx-8"
+                style={{ 
+                  scrollbarWidth: 'none',
+                  msOverflowStyle: 'none'
+                }}
               >
-                {index + 1}
-              </button>
-            ))}
+                <div className="flex gap-2 pb-2 min-w-max">
+                  {frames.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentFrame(index)}
+                      className={`flex-shrink-0 w-16 h-12 rounded-lg flex items-center justify-center text-sm font-medium transition-all duration-200 ${
+                        index === currentFrame
+                          ? 'bg-blue-500 text-white shadow-lg scale-105'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         
         {/* Timeline Collapse Button */}
         <button
           onClick={() => setTimelineCollapsed(!timelineCollapsed)}
-          className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-8 h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
+          className="absolute -top-6 md:-top-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-10 h-10 md:w-8 md:h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
         >
-          {timelineCollapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {timelineCollapsed ? <ChevronUp className="w-5 h-5 md:w-4 md:h-4" /> : <ChevronDown className="w-5 h-5 md:w-4 md:h-4" />}
         </button>
       </div>
 
       {/* Save Modal */}
       {showSaveModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Save Animation</h3>
             <input
               type="text"
               placeholder="Enter animation name..."
               value={animationName}
               onChange={(e) => setAnimationName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-4 md:p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
               onKeyPress={(e) => e.key === 'Enter' && saveAnimation()}
             />
             <div className="flex gap-3">
               <button
                 onClick={() => setShowSaveModal(false)}
-                className="flex-1 p-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200"
+                className="flex-1 p-4 md:p-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200 touch-manipulation"
               >
                 Cancel
               </button>
               <button
                 onClick={saveAnimation}
-                className="flex-1 p-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200"
+                className="flex-1 p-4 md:p-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
               >
                 Save
               </button>
@@ -1232,32 +1681,32 @@ const StickmanAnimator = () => {
 
       {/* Load Modal */}
       {showLoadModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-hidden">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Load Animation</h3>
-            <div className="max-h-96 overflow-y-auto">
+            <div className="max-h-80 md:max-h-96 overflow-y-auto">
               {savedAnimations.length === 0 ? (
                 <p className="text-gray-500 text-center py-8">No saved animations found</p>
               ) : (
                 <div className="space-y-3">
                   {savedAnimations.map((animation, index) => (
-                    <div key={index} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
-                      <div>
+                    <div key={index} className="flex flex-col md:flex-row md:items-center gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                      <div className="flex-1">
                         <h4 className="font-medium text-gray-800">{animation.name}</h4>
                         <p className="text-sm text-gray-500">
                           {new Date(animation.date).toLocaleDateString()} • {animation.frames?.length || 0} frames
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 w-full md:w-auto">
                         <button
                           onClick={() => loadAnimation(animation)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200"
+                          className="flex-1 md:flex-none px-4 py-3 md:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
                         >
                           Load
                         </button>
                         <button
                           onClick={() => deleteAnimation(index)}
-                          className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200"
+                          className="flex-1 md:flex-none px-4 py-3 md:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 touch-manipulation"
                         >
                           Delete
                         </button>
@@ -1270,7 +1719,7 @@ const StickmanAnimator = () => {
             <div className="flex justify-end mt-6">
               <button
                 onClick={() => setShowLoadModal(false)}
-                className="px-6 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200"
+                className="px-6 py-4 md:py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200 touch-manipulation"
               >
                 Close
               </button>
@@ -1281,8 +1730,8 @@ const StickmanAnimator = () => {
 
       {/* Export Status */}
       {isExporting && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
             <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
             <h3 className="text-lg font-medium text-gray-800 mb-2">Exporting GIF...</h3>
             <p className="text-gray-600">This may take a few moments</p>
