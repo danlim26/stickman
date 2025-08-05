@@ -1,0 +1,18 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="192" height="192" rx="24" fill="#3B82F6"/>
+  <g transform="translate(48, 48)">
+    <!-- Stickman figure -->
+    <!-- Head -->
+    <circle cx="48" cy="24" r="12" fill="white" stroke="white" stroke-width="2"/>
+    <!-- Body -->
+    <line x1="48" y1="36" x2="48" y2="72" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    <!-- Arms -->
+    <line x1="48" y1="48" x2="32" y2="60" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    <line x1="48" y1="48" x2="64" y2="60" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    <!-- Legs -->
+    <line x1="48" y1="72" x2="32" y2="96" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    <line x1="48" y1="72" x2="64" y2="96" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <text x="96" y="150" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="16" font-weight="bold">Stickman</text>
+  <text x="96" y="168" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="16" font-weight="bold">Animator</text>
+</svg>
