@@ -210,6 +210,17 @@ const StickmanAnimator = () => {
     };
   };
 
+  const getTouchPos = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0] || e.changedTouches[0];
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
+    };
+  };
+
   const isPointInSelection = (pos: {x: number, y: number}) => {
     if (selectedPaths.length === 0) return false;
     
@@ -230,6 +241,28 @@ const StickmanAnimator = () => {
     
     if (isSelecting) {
       // Check if clicking on selected paths to start dragging
+      if (selectedPaths.length > 0 && isPointInSelection(pos)) {
+        setIsDragging(true);
+        setDragStart(pos);
+        return;
+      }
+      
+      // Otherwise start new selection
+      setSelectionStart(pos);
+      setSelectionEnd(pos);
+      setSelectedPaths([]);
+    } else {
+      setIsDrawing(true);
+      setCurrentPath([pos]);
+    }
+  };
+
+  const startDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // Prevent scrolling
+    const pos = getTouchPos(e);
+    
+    if (isSelecting) {
+      // Check if touching on selected paths to start dragging
       if (selectedPaths.length > 0 && isPointInSelection(pos)) {
         setIsDragging(true);
         setDragStart(pos);
@@ -315,7 +348,119 @@ const StickmanAnimator = () => {
     }
   };
 
+  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // Prevent scrolling
+    const pos = getTouchPos(e);
+    
+    if (isDragging && dragStart && selectedPaths.length > 0) {
+      // Calculate drag offset
+      const deltaX = pos.x - dragStart.x;
+      const deltaY = pos.y - dragStart.y;
+      
+      // Move selected paths
+      const newFrames = [...frames];
+      selectedPaths.forEach(pathIndex => {
+        if (newFrames[currentFrame][pathIndex]) {
+          newFrames[currentFrame][pathIndex] = newFrames[currentFrame][pathIndex].map(point => ({
+            x: point.x + deltaX,
+            y: point.y + deltaY
+          }));
+        }
+      });
+      
+      setFrames(newFrames);
+      setDragStart(pos); // Update drag start for next move
+      redrawCanvas();
+      return;
+    }
+    
+    if (isSelecting && selectionStart && !isDragging) {
+      setSelectionEnd(pos);
+      redrawCanvas();
+      return;
+    }
+    
+    if (!isDrawing) return;
+    
+    if (isErasing) {
+      // Eraser functionality - remove paths near the cursor
+      const newFrames = [...frames];
+      const eraserRadius = brushSize * 3; // Make eraser larger than brush
+      
+      newFrames[currentFrame] = newFrames[currentFrame].filter(path => {
+        return !path.some(point => {
+          const distance = Math.sqrt(Math.pow(point.x - pos.x, 2) + Math.pow(point.y - pos.y, 2));
+          return distance < eraserRadius;
+        });
+      });
+      
+      setFrames(newFrames);
+      redrawCanvas();
+    } else {
+      // Normal drawing
+      setCurrentPath(prev => [...prev, pos]);
+      
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      ctx.strokeStyle = currentColor;
+      ctx.lineWidth = brushSize;
+      
+      if (currentPath.length > 0) {
+        ctx.beginPath();
+        const lastPoint = currentPath[currentPath.length - 1];
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      }
+    }
+  };
+
   const stopDrawing = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragStart(null);
+      return;
+    }
+    
+    if (isSelecting && selectionStart && selectionEnd) {
+      // Find paths within selection rectangle
+      const minX = Math.min(selectionStart.x, selectionEnd.x);
+      const maxX = Math.max(selectionStart.x, selectionEnd.x);
+      const minY = Math.min(selectionStart.y, selectionEnd.y);
+      const maxY = Math.max(selectionStart.y, selectionEnd.y);
+      
+      const pathsInSelection: number[] = [];
+      frames[currentFrame].forEach((path, index) => {
+        const pathInBounds = path.some(point => 
+          point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+        );
+        if (pathInBounds) {
+          pathsInSelection.push(index);
+        }
+      });
+      
+      setSelectedPaths(pathsInSelection);
+      setSelectionStart(null);
+      setSelectionEnd(null);
+      redrawCanvas();
+      return;
+    }
+    
+    if (isDrawing && currentPath.length > 1 && !isErasing) {
+      const newFrames = [...frames];
+      newFrames[currentFrame] = [...newFrames[currentFrame], currentPath];
+      setFrames(newFrames);
+    }
+    setIsDrawing(false);
+    setCurrentPath([]);
+  };
+
+  const stopDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // Prevent scrolling
+    
     if (isDragging) {
       setIsDragging(false);
       setDragStart(null);
@@ -651,12 +796,17 @@ const StickmanAnimator = () => {
         onMouseMove={draw}
         onMouseUp={stopDrawing}
         onMouseLeave={stopDrawing}
+        onTouchStart={startDrawingTouch}
+        onTouchMove={drawTouch}
+        onTouchEnd={stopDrawingTouch}
+        onTouchCancel={stopDrawingTouch}
         style={{ 
           cursor: isDragging ? 'grabbing' :
                  isErasing ? 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><circle cx=\'12\' cy=\'12\' r=\'9\' fill=\'none\' stroke=\'%23ff3b30\' stroke-width=\'2\'/><line x1=\'8\' y1=\'8\' x2=\'16\' y2=\'16\' stroke=\'%23ff3b30\' stroke-width=\'2\'/><line x1=\'16\' y1=\'8\' x2=\'8\' y2=\'16\' stroke=\'%23ff3b30\' stroke-width=\'2\'/></svg>") 12 12, crosshair' : 
                  isSelecting && selectedPaths.length > 0 ? 'grab' :
                  isSelecting ? 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><rect x=\'3\' y=\'3\' width=\'18\' height=\'18\' fill=\'none\' stroke=\'%23007aff\' stroke-width=\'2\' stroke-dasharray=\'3,3\'/></svg>") 12 12, crosshair' : 
-                 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'4\' height=\'4\' viewBox=\'0 0 4 4\'><circle cx=\'2\' cy=\'2\' r=\'1\' fill=\'%23000\'/></svg>") 2 2, crosshair'
+                 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'4\' height=\'4\' viewBox=\'0 0 4 4\'><circle cx=\'2\' cy=\'2\' r=\'1\' fill=\'%23000\'/></svg>") 2 2, crosshair',
+          touchAction: 'none' // Prevent default touch behaviors like scrolling and zooming
         }}
       />
 
