@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, Pause, Square, RotateCcw, Plus, Trash2, Copy, Download, 
-  Brush, Move, MousePointer, Settings, Layers, Palette, ChevronUp, ChevronDown,
+  Brush, Move, MousePointer, Settings, Layers, ChevronUp, ChevronDown,
   Grid3X3, Eye, EyeOff, Minimize2, Maximize2, Upload, Save, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { SketchPicker } from 'react-color';
@@ -12,11 +12,58 @@ import { saveAs } from 'file-saver';
 import InstallPrompt from './InstallPrompt';
 
 const StickmanAnimator = () => {
+  // Custom slider styles
+  const getSliderStyle = (value: number, min: number, max: number) => {
+    const percentage = ((value - min) / (max - min)) * 100;
+    return {
+      appearance: 'none' as const,
+      height: '8px',
+      borderRadius: '4px',
+      background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${percentage}%, #E5E5E5 ${percentage}%, #E5E5E5 100%)`,
+      outline: 'none',
+      WebkitAppearance: 'none' as const,
+      MozAppearance: 'none' as const,
+    };
+  };
+
+  const sliderThumbStyle = `
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+    
+    input[type="range"]::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+    
+    input[type="range"]::-ms-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+  `;
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{x: number, y: number}[]>([]);
-  const [frames, setFrames] = useState<{x: number, y: number}[][][]>([[]]);
+  const [frames, setFrames] = useState<{path: {x: number, y: number}[], color: string, brushSize: number}[][]>([[]]);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [fps, setFps] = useState(12);
@@ -27,15 +74,16 @@ const StickmanAnimator = () => {
   const [selectionStart, setSelectionStart] = useState<{x: number, y: number} | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<{x: number, y: number} | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<number[]>([]);
-  const [clipboard, setClipboard] = useState<{x: number, y: number}[][]>([]);
+  const [clipboard, setClipboard] = useState<{path: {x: number, y: number}[], color: string, brushSize: number}[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{x: number, y: number} | null>(null);
   const [currentColor, setCurrentColor] = useState('#000000');
-  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showColorModal, setShowColorModal] = useState(false);
+  const [recentColors, setRecentColors] = useState<string[]>(['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFFFFF']);
   const [isExporting, setIsExporting] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
-  const [savedAnimations, setSavedAnimations] = useState<{name: string, frames: {x: number, y: number}[][][], date: string, fps: number, brushSize: number}[]>([]);
+  const [savedAnimations, setSavedAnimations] = useState<{name: string, frames: {path: {x: number, y: number}[], color: string, brushSize: number}[][], date: string, fps: number, brushSize: number}[]>([]);
   const [animationName, setAnimationName] = useState('');
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -100,7 +148,28 @@ const StickmanAnimator = () => {
         console.error('Error loading saved animations:', error);
       }
     }
+    
+    const savedColors = localStorage.getItem('stickman-recent-colors');
+    if (savedColors) {
+      try {
+        setRecentColors(JSON.parse(savedColors));
+      } catch (error) {
+        console.error('Error loading recent colors:', error);
+      }
+    }
   }, []);
+
+  // Function to update current color and recent colors
+  const updateCurrentColor = (newColor: string) => {
+    setCurrentColor(newColor);
+    
+    // Add to recent colors if not already present
+    if (!recentColors.includes(newColor)) {
+      const updatedRecentColors = [newColor, ...recentColors.slice(0, 7)];
+      setRecentColors(updatedRecentColors);
+      localStorage.setItem('stickman-recent-colors', JSON.stringify(updatedRecentColors));
+    }
+  };
 
   // Initialize canvas
   useEffect(() => {
@@ -214,21 +283,23 @@ const StickmanAnimator = () => {
 
     // Draw onion skin (previous frame)
     if (showOnionSkin && currentFrame > 0) {
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-      ctx.lineWidth = brushSize;
-      drawFrame(ctx, frames[currentFrame - 1]);
+      const prevFrame = frames[currentFrame - 1].map(stroke => ({
+        ...stroke,
+        color: 'rgba(255, 0, 0, 0.3)'
+      }));
+      drawFrame(ctx, prevFrame);
     }
 
     // Draw onion skin (next frame)
     if (showOnionSkin && currentFrame < frames.length - 1) {
-      ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)';
-      ctx.lineWidth = brushSize;
-      drawFrame(ctx, frames[currentFrame + 1]);
+      const nextFrame = frames[currentFrame + 1].map(stroke => ({
+        ...stroke,
+        color: 'rgba(0, 0, 255, 0.3)'
+      }));
+      drawFrame(ctx, nextFrame);
     }
 
     // Draw current frame
-    ctx.strokeStyle = currentColor;
-    ctx.lineWidth = brushSize;
     drawFrame(ctx, frames[currentFrame]);
 
     // Draw selection rectangle
@@ -248,14 +319,14 @@ const StickmanAnimator = () => {
     // Highlight selected paths
     if (selectedPaths.length > 0) {
       ctx.strokeStyle = 'rgba(0, 123, 255, 0.6)';
-      ctx.lineWidth = brushSize + 2;
       selectedPaths.forEach(pathIndex => {
         if (frames[currentFrame][pathIndex]) {
-          const path = frames[currentFrame][pathIndex];
-          if (path.length < 2) return;
+          const stroke = frames[currentFrame][pathIndex];
+          if (stroke.path.length < 2) return;
+          ctx.lineWidth = stroke.brushSize + 2;
           ctx.beginPath();
-          ctx.moveTo(path[0].x, path[0].y);
-          path.forEach(point => {
+          ctx.moveTo(stroke.path[0].x, stroke.path[0].y);
+          stroke.path.forEach(point => {
             ctx.lineTo(point.x, point.y);
           });
           ctx.stroke();
@@ -264,12 +335,14 @@ const StickmanAnimator = () => {
     }
   };
 
-  const drawFrame = (ctx: CanvasRenderingContext2D, frameData: {x: number, y: number}[][]) => {
-    frameData.forEach(path => {
-      if (path.length < 2) return;
+  const drawFrame = (ctx: CanvasRenderingContext2D, frameData: {path: {x: number, y: number}[], color: string, brushSize: number}[]) => {
+    frameData.forEach(stroke => {
+      if (stroke.path.length < 2) return;
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.brushSize;
       ctx.beginPath();
-      ctx.moveTo(path[0].x, path[0].y);
-      path.forEach(point => {
+      ctx.moveTo(stroke.path[0].x, stroke.path[0].y);
+      stroke.path.forEach(point => {
         ctx.lineTo(point.x, point.y);
       });
       ctx.stroke();
@@ -302,10 +375,10 @@ const StickmanAnimator = () => {
     
     // Check if the cursor is over any selected path
     return selectedPaths.some(pathIndex => {
-      const path = frames[currentFrame][pathIndex];
-      if (!path) return false;
+      const stroke = frames[currentFrame][pathIndex];
+      if (!stroke) return false;
       
-      return path.some(point => {
+      return stroke.path.some(point => {
         const distance = Math.sqrt(Math.pow(point.x - pos.x, 2) + Math.pow(point.y - pos.y, 2));
         return distance < 10; // 10px tolerance for clicking on a line
       });
@@ -367,10 +440,13 @@ const StickmanAnimator = () => {
       const newFrames = [...frames];
       selectedPaths.forEach(pathIndex => {
         if (newFrames[currentFrame][pathIndex]) {
-          newFrames[currentFrame][pathIndex] = newFrames[currentFrame][pathIndex].map(point => ({
-            x: point.x + deltaX,
-            y: point.y + deltaY
-          }));
+          newFrames[currentFrame][pathIndex] = {
+            ...newFrames[currentFrame][pathIndex],
+            path: newFrames[currentFrame][pathIndex].path.map(point => ({
+              x: point.x + deltaX,
+              y: point.y + deltaY
+            }))
+          };
         }
       });
       
@@ -393,8 +469,8 @@ const StickmanAnimator = () => {
       const newFrames = [...frames];
       const eraserRadius = brushSize * 3; // Make eraser larger than brush
       
-      newFrames[currentFrame] = newFrames[currentFrame].filter(path => {
-        return !path.some(point => {
+      newFrames[currentFrame] = newFrames[currentFrame].filter(stroke => {
+        return !stroke.path.some(point => {
           const distance = Math.sqrt(Math.pow(point.x - pos.x, 2) + Math.pow(point.y - pos.y, 2));
           return distance < eraserRadius;
         });
@@ -437,10 +513,13 @@ const StickmanAnimator = () => {
       const newFrames = [...frames];
       selectedPaths.forEach(pathIndex => {
         if (newFrames[currentFrame][pathIndex]) {
-          newFrames[currentFrame][pathIndex] = newFrames[currentFrame][pathIndex].map(point => ({
-            x: point.x + deltaX,
-            y: point.y + deltaY
-          }));
+          newFrames[currentFrame][pathIndex] = {
+            ...newFrames[currentFrame][pathIndex],
+            path: newFrames[currentFrame][pathIndex].path.map(point => ({
+              x: point.x + deltaX,
+              y: point.y + deltaY
+            }))
+          };
         }
       });
       
@@ -463,8 +542,8 @@ const StickmanAnimator = () => {
       const newFrames = [...frames];
       const eraserRadius = brushSize * 3; // Make eraser larger than brush
       
-      newFrames[currentFrame] = newFrames[currentFrame].filter(path => {
-        return !path.some(point => {
+      newFrames[currentFrame] = newFrames[currentFrame].filter(stroke => {
+        return !stroke.path.some(point => {
           const distance = Math.sqrt(Math.pow(point.x - pos.x, 2) + Math.pow(point.y - pos.y, 2));
           return distance < eraserRadius;
         });
@@ -509,8 +588,8 @@ const StickmanAnimator = () => {
       const maxY = Math.max(selectionStart.y, selectionEnd.y);
       
       const pathsInSelection: number[] = [];
-      frames[currentFrame].forEach((path, index) => {
-        const pathInBounds = path.some(point => 
+      frames[currentFrame].forEach((stroke, index) => {
+        const pathInBounds = stroke.path.some(point => 
           point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
         );
         if (pathInBounds) {
@@ -527,7 +606,11 @@ const StickmanAnimator = () => {
     
     if (isDrawing && currentPath.length > 1 && !isErasing) {
       const newFrames = [...frames];
-      newFrames[currentFrame] = [...newFrames[currentFrame], currentPath];
+      newFrames[currentFrame] = [...newFrames[currentFrame], {
+        path: currentPath,
+        color: currentColor,
+        brushSize: brushSize
+      }];
       setFrames(newFrames);
     }
     setIsDrawing(false);
@@ -551,8 +634,8 @@ const StickmanAnimator = () => {
       const maxY = Math.max(selectionStart.y, selectionEnd.y);
       
       const pathsInSelection: number[] = [];
-      frames[currentFrame].forEach((path, index) => {
-        const pathInBounds = path.some(point => 
+      frames[currentFrame].forEach((stroke, index) => {
+        const pathInBounds = stroke.path.some(point => 
           point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
         );
         if (pathInBounds) {
@@ -569,7 +652,11 @@ const StickmanAnimator = () => {
     
     if (isDrawing && currentPath.length > 1 && !isErasing) {
       const newFrames = [...frames];
-      newFrames[currentFrame] = [...newFrames[currentFrame], currentPath];
+      newFrames[currentFrame] = [...newFrames[currentFrame], {
+        path: currentPath,
+        color: currentColor,
+        brushSize: brushSize
+      }];
       setFrames(newFrames);
     }
     setIsDrawing(false);
@@ -615,12 +702,13 @@ const StickmanAnimator = () => {
     
     const newFrames = [...frames];
     // Offset pasted content slightly so it's visible
-    const offsetPaths = clipboard.map(path => 
-      path.map(point => ({
+    const offsetPaths = clipboard.map(stroke => ({
+      ...stroke,
+      path: stroke.path.map(point => ({
         x: point.x + 20,
         y: point.y + 20
       }))
-    );
+    }));
     
     newFrames[currentFrame] = [...newFrames[currentFrame], ...offsetPaths];
     setFrames(newFrames);
@@ -691,7 +779,7 @@ const StickmanAnimator = () => {
     alert('Animation saved successfully!');
   };
 
-  const loadAnimation = (animationData: {name: string, frames: {x: number, y: number}[][][], date: string, fps: number, brushSize: number}) => {
+  const loadAnimation = (animationData: {name: string, frames: {path: {x: number, y: number}[], color: string, brushSize: number}[][], date: string, fps: number, brushSize: number}) => {
     setFrames(animationData.frames);
     setCurrentFrame(0);
     setFps(animationData.fps || 12);
@@ -841,7 +929,7 @@ const StickmanAnimator = () => {
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     
-    const stickFigure = [
+    const stickFigurePaths = [
       // Head
       [{x: centerX, y: centerY - 60}, {x: centerX + 15, y: centerY - 60}, {x: centerX + 15, y: centerY - 45}, {x: centerX, y: centerY - 45}, {x: centerX, y: centerY - 60}],
       // Body
@@ -855,6 +943,12 @@ const StickmanAnimator = () => {
       // Right leg
       [{x: centerX + 7, y: centerY + 15}, {x: centerX + 30, y: centerY + 45}]
     ];
+
+    const stickFigure = stickFigurePaths.map(path => ({
+      path,
+      color: currentColor,
+      brushSize: brushSize
+    }));
 
     const newFrames = [...frames];
     newFrames[currentFrame] = [...newFrames[currentFrame], ...stickFigure];
@@ -930,6 +1024,8 @@ const StickmanAnimator = () => {
 
   return (
     <div ref={containerRef} className="relative h-screen w-screen bg-white overflow-hidden">
+      {/* Custom slider styles */}
+      <style dangerouslySetInnerHTML={{ __html: sliderThumbStyle }} />
       {/* Fullscreen Canvas */}
       <canvas
         ref={canvasRef}
@@ -958,7 +1054,7 @@ const StickmanAnimator = () => {
       <div className={`absolute top-2 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 w-full max-w-7xl px-2 md:px-4 ${
         toolbarCollapsed ? 'translate-y-[-120px] md:translate-y-[-80px]' : 'translate-y-0'
       }`}>
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-2 md:p-3">
+        <div className="floating-panel p-2 md:p-3">
           {/* Mobile Layout - Stacked */}
           <div className="md:hidden space-y-2">
             {/* Row 1: Main Tools */}
@@ -971,10 +1067,10 @@ const StickmanAnimator = () => {
                     setIsErasing(false);
                     clearSelection();
                   }}
-                  className={`p-4 rounded-lg transition-all duration-200 ${
+                  className={`btn-icon touch-target ${
                     activePanel === 'draw' && !isSelecting && !isErasing
-                      ? 'bg-blue-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                      ? 'active'
+                      : ''
                   }`}
                 >
                   <Brush className="w-6 h-6" />
@@ -987,10 +1083,10 @@ const StickmanAnimator = () => {
                     setIsSelecting(!isSelecting);
                     clearSelection();
                   }}
-                  className={`p-4 rounded-lg transition-all duration-200 ${
+                  className={`btn-icon touch-target ${
                     activePanel === 'select' && isSelecting
-                      ? 'bg-blue-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                      ? 'active'
+                      : ''
                   }`}
                 >
                   <MousePointer className="w-6 h-6" />
@@ -1003,10 +1099,10 @@ const StickmanAnimator = () => {
                     setIsErasing(!isErasing);
                     clearSelection();
                   }}
-                  className={`p-4 rounded-lg transition-all duration-200 ${
+                  className={`btn-icon touch-target danger ${
                     activePanel === 'erase' && isErasing
-                      ? 'bg-red-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:bg-white hover:shadow-sm'
+                      ? 'active'
+                      : ''
                   }`}
                 >
                   <Trash2 className="w-6 h-6" />
@@ -1015,32 +1111,21 @@ const StickmanAnimator = () => {
 
               {/* Color & Animation Controls */}
               <div className="flex items-center gap-2">
-                <div className="relative flex items-center">
-                  <button
-                    onClick={() => setShowColorPicker(!showColorPicker)}
-                    className="p-4 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
-                    title="Color Picker"
-                  >
-                    <Palette className="w-6 h-6" />
-                  </button>
-                  
-                  {showColorPicker && (
-                    <div className="absolute top-full left-0 mt-2 z-50">
-                      <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
-                      <SketchPicker
-                        color={currentColor}
-                        onChange={(color) => setCurrentColor(color.hex)}
-                      />
-                    </div>
-                  )}
-                </div>
+                                  <div className="relative flex items-center gap-2">
+                    <div 
+                      className="w-10 h-10 rounded-lg border-2 border-gray-400 cursor-pointer shadow-sm hover:shadow-md transition-all"
+                      style={{ backgroundColor: currentColor }}
+                      onClick={() => setShowColorModal(true)}
+                      title="Color Picker"
+                    />
+                  </div>
 
                 <button
                   onClick={playAnimation}
-                  className={`p-4 rounded-lg transition-all duration-200 ${
+                  className={`btn-icon touch-target ${
                     isPlaying
-                      ? 'bg-green-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:bg-gray-100'
+                      ? 'active'
+                      : ''
                   }`}
                 >
                   {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
@@ -1070,7 +1155,8 @@ const StickmanAnimator = () => {
                     max="20"
                     value={brushSize}
                     onChange={(e) => setBrushSize(Number(e.target.value))}
-                    className="w-24 accent-blue-500"
+                    className="w-24"
+                    style={getSliderStyle(brushSize, 1, 20)}
                   />
                 </div>
 
@@ -1108,7 +1194,8 @@ const StickmanAnimator = () => {
                     max="60"
                     value={fps}
                     onChange={(e) => setFps(Number(e.target.value))}
-                    className="w-20 accent-blue-500"
+                    className="w-20"
+                    style={getSliderStyle(fps, 1, 60)}
                   />
                 </div>
 
@@ -1193,29 +1280,12 @@ const StickmanAnimator = () => {
 
             {/* Color Picker */}
             <div className="relative flex items-center gap-2 px-3">
-              <button
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                className="p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200"
-                title="Color Picker"
-              >
-                <Palette className="w-5 h-5" />
-              </button>
               <div 
-                className="w-8 h-8 rounded border-2 border-gray-300 cursor-pointer"
+                className="w-10 h-10 rounded-lg border-2 border-gray-400 cursor-pointer shadow-sm hover:shadow-md transition-all"
                 style={{ backgroundColor: currentColor }}
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                title="Current Color"
+                onClick={() => setShowColorModal(true)}
+                title="Color Picker"
               />
-              
-              {showColorPicker && (
-                <div className="absolute top-full left-0 mt-2 z-50">
-                  <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
-                  <SketchPicker
-                    color={currentColor}
-                    onChange={(color) => setCurrentColor(color.hex)}
-                  />
-                </div>
-              )}
             </div>
 
             <div className="w-px h-8 bg-gray-200 mx-2" />
@@ -1239,7 +1309,8 @@ const StickmanAnimator = () => {
                 max="20"
                 value={brushSize}
                 onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-20 accent-blue-500"
+                className="w-20"
+                style={getSliderStyle(brushSize, 1, 20)}
               />
             </div>
 
@@ -1339,7 +1410,8 @@ const StickmanAnimator = () => {
                 max="60"
                 value={fps}
                 onChange={(e) => setFps(Number(e.target.value))}
-                className="w-16 accent-blue-500"
+                className="w-16"
+                style={getSliderStyle(fps, 1, 60)}
               />
             </div>
           </div>
@@ -1348,7 +1420,7 @@ const StickmanAnimator = () => {
         {/* Toolbar Collapse Button */}
         <button
           onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
-          className="absolute -bottom-6 md:-bottom-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-10 h-10 md:w-8 md:h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
+          className="btn-icon absolute -bottom-6 md:-bottom-8 left-1/2 transform -translate-x-1/2 floating-panel shadow-lg hover-scale"
         >
           {toolbarCollapsed ? <ChevronDown className="w-5 h-5 md:w-4 md:h-4" /> : <ChevronUp className="w-5 h-5 md:w-4 md:h-4" />}
         </button>
@@ -1356,11 +1428,11 @@ const StickmanAnimator = () => {
 
       {/* Quick Actions Floating Panel */}
       <div className="absolute top-2 md:top-4 right-2 md:right-4 z-20">
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-2">
+        <div className="floating-panel p-2">
           <div className="flex flex-col gap-1">
             <button
               onClick={drawStickFigure}
-              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+              className="btn-icon touch-target"
               title="Add Stickman"
             >
               <Plus className="w-6 h-6 md:w-5 md:h-5" />
@@ -1368,7 +1440,7 @@ const StickmanAnimator = () => {
             
             <button
               onClick={clearFrame}
-              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+              className="btn-icon touch-target"
               title="Clear Frame"
             >
               <RotateCcw className="w-6 h-6 md:w-5 md:h-5" />
@@ -1376,7 +1448,7 @@ const StickmanAnimator = () => {
             
             <button
               onClick={() => setShowSaveModal(true)}
-              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+              className="btn-icon touch-target"
               title="Save Animation"
             >
               <Save className="w-6 h-6 md:w-5 md:h-5" />
@@ -1384,7 +1456,7 @@ const StickmanAnimator = () => {
             
             <button
               onClick={() => setShowLoadModal(true)}
-              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 touch-manipulation"
+              className="btn-icon touch-target"
               title="Load Animation"
             >
               <Upload className="w-6 h-6 md:w-5 md:h-5" />
@@ -1393,7 +1465,7 @@ const StickmanAnimator = () => {
             <button
               onClick={downloadGIF}
               disabled={isExporting}
-              className="p-4 md:p-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-all duration-200 disabled:opacity-50 touch-manipulation"
+              className="btn-icon touch-target disabled:opacity-50"
               title="Export as GIF"
             >
               <Download className="w-6 h-6 md:w-5 md:h-5" />
@@ -1405,7 +1477,7 @@ const StickmanAnimator = () => {
       {/* Selection Controls Panel */}
       {(selectedPaths.length > 0 || clipboard.length > 0) && (
         <div className="absolute top-32 md:top-20 left-2 md:left-4 z-20 max-w-[calc(100vw-1rem)] md:max-w-none">
-          <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-3">
+          <div className="floating-panel p-3">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-sm font-medium text-gray-800">
                 {selectedPaths.length > 0 ? `${selectedPaths.length} selected` : 'Clipboard'}
@@ -1417,7 +1489,7 @@ const StickmanAnimator = () => {
                 <>
                   <button
                     onClick={copySelection}
-                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
+                    className="btn-primary text-sm touch-target"
                   >
                     <Copy className="w-5 h-5 md:w-4 md:h-4" />
                     Copy
@@ -1425,7 +1497,8 @@ const StickmanAnimator = () => {
                   
                   <button
                     onClick={deleteSelection}
-                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 touch-manipulation"
+                    className="btn-primary text-sm touch-target"
+                    style={{ background: 'var(--apple-red)' }}
                   >
                     <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
                     Delete
@@ -1433,7 +1506,7 @@ const StickmanAnimator = () => {
                   
                   <button
                     onClick={clearSelection}
-                    className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200 touch-manipulation"
+                    className="btn-secondary text-sm touch-target"
                   >
                     <MousePointer className="w-5 h-5 md:w-4 md:h-4" />
                     Clear
@@ -1444,7 +1517,8 @@ const StickmanAnimator = () => {
               {clipboard.length > 0 && (
                 <button
                   onClick={pasteSelection}
-                  className="flex items-center gap-2 px-4 py-3 md:px-3 md:py-2 text-sm bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all duration-200 touch-manipulation"
+                  className="btn-primary text-sm touch-target"
+                  style={{ background: 'var(--apple-green)' }}
                 >
                   <Copy className="w-5 h-5 md:w-4 md:h-4" />
                   Paste ({clipboard.length})
@@ -1459,7 +1533,7 @@ const StickmanAnimator = () => {
       <div className={`absolute bottom-2 md:bottom-4 left-1/2 transform -translate-x-1/2 z-20 transition-all duration-300 w-full max-w-7xl px-2 md:px-4 ${
         timelineCollapsed ? 'translate-y-[100px] md:translate-y-[80px]' : 'translate-y-0'
       }`}>
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-black/5 p-3 md:p-4">
+        <div className="floating-panel p-3 md:p-4">
           {/* Mobile Layout */}
           <div className="md:hidden">
             <div className="flex items-center justify-between mb-3">
@@ -1642,7 +1716,7 @@ const StickmanAnimator = () => {
         {/* Timeline Collapse Button */}
         <button
           onClick={() => setTimelineCollapsed(!timelineCollapsed)}
-          className="absolute -top-6 md:-top-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-xl rounded-full w-10 h-10 md:w-8 md:h-8 flex items-center justify-center shadow-lg border border-black/5 text-gray-600 hover:text-gray-800 transition-all duration-200"
+          className="btn-icon absolute -top-6 md:-top-8 left-1/2 transform -translate-x-1/2 floating-panel shadow-lg hover-scale"
         >
           {timelineCollapsed ? <ChevronUp className="w-5 h-5 md:w-4 md:h-4" /> : <ChevronDown className="w-5 h-5 md:w-4 md:h-4" />}
         </button>
@@ -1651,26 +1725,26 @@ const StickmanAnimator = () => {
       {/* Save Modal */}
       {showSaveModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
+          <div className="modal max-w-md w-full">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Save Animation</h3>
             <input
               type="text"
               placeholder="Enter animation name..."
               value={animationName}
               onChange={(e) => setAnimationName(e.target.value)}
-              className="w-full p-4 md:p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
+              className="input w-full mb-4 focus-ring"
               onKeyPress={(e) => e.key === 'Enter' && saveAnimation()}
             />
             <div className="flex gap-3">
               <button
                 onClick={() => setShowSaveModal(false)}
-                className="flex-1 p-4 md:p-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200 touch-manipulation"
+                className="btn-secondary flex-1 touch-target"
               >
                 Cancel
               </button>
               <button
                 onClick={saveAnimation}
-                className="flex-1 p-4 md:p-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
+                className="btn-primary flex-1 touch-target"
               >
                 Save
               </button>
@@ -1682,7 +1756,7 @@ const StickmanAnimator = () => {
       {/* Load Modal */}
       {showLoadModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-hidden">
+          <div className="modal max-w-2xl w-full max-h-[85vh] overflow-hidden">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Load Animation</h3>
             <div className="max-h-80 md:max-h-96 overflow-y-auto">
               {savedAnimations.length === 0 ? (
@@ -1700,13 +1774,14 @@ const StickmanAnimator = () => {
                       <div className="flex gap-2 w-full md:w-auto">
                         <button
                           onClick={() => loadAnimation(animation)}
-                          className="flex-1 md:flex-none px-4 py-3 md:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 touch-manipulation"
+                          className="btn-primary flex-1 md:flex-none touch-target"
                         >
                           Load
                         </button>
                         <button
                           onClick={() => deleteAnimation(index)}
-                          className="flex-1 md:flex-none px-4 py-3 md:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 touch-manipulation"
+                          className="btn-primary flex-1 md:flex-none touch-target"
+                          style={{ background: 'var(--apple-red)' }}
                         >
                           Delete
                         </button>
@@ -1719,7 +1794,7 @@ const StickmanAnimator = () => {
             <div className="flex justify-end mt-6">
               <button
                 onClick={() => setShowLoadModal(false)}
-                className="px-6 py-4 md:py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200 touch-manipulation"
+                className="btn-secondary touch-target"
               >
                 Close
               </button>
@@ -1731,7 +1806,7 @@ const StickmanAnimator = () => {
       {/* Export Status */}
       {isExporting && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+          <div className="modal max-w-sm w-full text-center">
             <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
             <h3 className="text-lg font-medium text-gray-800 mb-2">Exporting GIF...</h3>
             <p className="text-gray-600">This may take a few moments</p>
@@ -1745,6 +1820,94 @@ const StickmanAnimator = () => {
           <div className="bg-red-500 text-white px-4 py-2 rounded-full flex items-center gap-2">
             <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
             <span className="font-medium">Recording...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Enhanced Color Picker Modal */}
+      {showColorModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="modal max-w-lg w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-800">Color Picker</h3>
+              <button
+                onClick={() => setShowColorModal(false)}
+                className="btn-icon"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Main Color Picker */}
+              <div>
+                <SketchPicker
+                  color={currentColor}
+                  onChange={(color) => updateCurrentColor(color.hex)}
+                  width="100%"
+                />
+              </div>
+              
+              {/* Color Selection Tools */}
+              <div className="space-y-4">
+                {/* Hex Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Hex Color</label>
+                  <input
+                    type="text"
+                    value={currentColor}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                        updateCurrentColor(value);
+                      }
+                    }}
+                    className="input w-full"
+                    placeholder="#000000"
+                  />
+                </div>
+                
+                {/* Recent Colors */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Recent Colors</label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {recentColors.map((color, index) => (
+                      <button
+                        key={index}
+                        className={`w-10 h-10 rounded-lg border-2 transition-all hover:scale-110 ${
+                          color === currentColor ? 'border-gray-800' : 'border-gray-300'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => updateCurrentColor(color)}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Preset Colors */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preset Colors</label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {['#FF0000', '#FF8000', '#FFFF00', '#80FF00', '#00FF00', '#00FF80', '#00FFFF', '#0080FF',
+                      '#0000FF', '#8000FF', '#FF00FF', '#FF0080', '#FFFFFF', '#C0C0C0', '#808080', '#000000'
+                    ].map((color, index) => (
+                      <button
+                        key={index}
+                        className={`w-10 h-10 rounded-lg border-2 transition-all hover:scale-110 ${
+                          color === currentColor ? 'border-gray-800' : 'border-gray-300'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => updateCurrentColor(color)}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
